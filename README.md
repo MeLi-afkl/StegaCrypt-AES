@@ -4,7 +4,7 @@
 
 StegaCrypt AES is a web application that combines **AES-256-GCM authenticated encryption** with **LSB (Least Significant Bit) image steganography** to securely hide encrypted text messages inside images.
 
-The message is encrypted before being embedded into the image, providing two layers of protection: **cryptography** protects the content, while **steganography** conceals its existence.
+The message is encrypted before being embedded into the image, providing two complementary layers of protection: **cryptography** protects the content, while **steganography** conceals the presence of the encrypted data.
 
 ---
 
@@ -23,76 +23,178 @@ The message is encrypted before being embedded into the image, providing two lay
 ## ✨ Features
 
 - 🔐 AES-256-GCM authenticated encryption
-- 🖼️ LSB image steganography
-- 🔑 Password-based encryption
-- 📥 Download generated stego images
-- 🔎 Extract hidden encrypted data from an image
-- 🔓 Decrypt the recovered message using the correct password
-- 🌐 Runs directly in the browser
+- 🔑 Password-based key derivation using PBKDF2-SHA256
+- 🧂 Cryptographically random 16-byte salt
+- 🔄 Cryptographically random 12-byte IV for each encryption
+- 🖼️ LSB image steganography using RGB channels
+- 📏 32-bit payload length header
+- 📥 PNG stego image generation and download
+- 🔎 Hidden payload extraction
+- 🔓 Password-based message decryption
+- 🛡️ Basic payload structure validation
+- 🌐 Runs entirely in the browser
 - ⚛️ Built with React and Vite
-- 🎨 Simple responsive dark interface
 
 ---
 
 ## 🔄 How It Works
 
-### Hiding a message
+StegaCrypt first encrypts the secret message and only then hides the encrypted data inside an image.
+
+### Encryption & Embedding
 
 ```text
 Secret Message
       │
       ▼
+User Password
+      │
+      ▼
+PBKDF2 + SHA-256
+100,000 iterations
+16-byte random salt
+      │
+      ▼
+256-bit AES Key
+      │
+      ▼
 AES-256-GCM Encryption
+12-byte random IV
       │
       ▼
 Encrypted Payload
       │
       ▼
-LSB Steganography
+32-bit Length Header + Payload
       │
       ▼
-Stego Image
+RGB LSB Embedding
+      │
+      ▼
+PNG Stego Image
 ```
 
 The user selects an image, enters a secret message and provides a password.
 
-StegaCrypt encrypts the message and then embeds the resulting encrypted payload into the least significant bits of the image pixel data.
+The password is processed using **PBKDF2 with SHA-256**, a randomly generated 16-byte salt and 100,000 iterations. This process derives the 256-bit key used for AES-GCM encryption.
 
-### Recovering a message
+A new random 12-byte IV is generated for every encryption operation.
+
+The resulting encrypted payload is then embedded into the least significant bits of the image's RGB channels.
+
+---
+
+### Extraction & Decryption
 
 ```text
-Stego Image
+PNG Stego Image
       │
       ▼
-LSB Extraction
+Read 32-bit Length Header
       │
       ▼
-Encrypted Payload
+Extract LSB Payload
       │
       ▼
-AES-GCM Decryption
+Recover Salt + IV + Ciphertext
+      │
+      ▼
+PBKDF2 Key Derivation
+      │
+      ▼
+AES-256-GCM Decryption
       │
       ▼
 Original Message
 ```
 
-The application extracts the hidden payload from the image and attempts to decrypt it using the supplied password.
+During extraction, StegaCrypt first reads the 32-bit header to determine exactly how many payload bits are stored inside the image.
+
+The encrypted payload is reconstructed, the AES key is derived again from the supplied password and stored salt, and AES-GCM attempts to authenticate and decrypt the message.
 
 ---
 
 ## 🛡️ Security Design
 
-StegaCrypt uses two complementary techniques:
+StegaCrypt combines **authenticated encryption**, **password-based key derivation**, and **image steganography**.
 
-**Cryptography**  
-The secret message is encrypted using AES-GCM before it is embedded into the image. AES-GCM provides both confidentiality and authentication, allowing the application to detect incorrect credentials or modified encrypted data.
+### Password-Based Key Derivation
 
-**Steganography**  
-The encrypted payload is embedded using Least Significant Bit manipulation. Small changes are made to image pixel values to encode the hidden information while keeping the visual appearance of the image largely unchanged.
+The user's password is **not used directly as the AES key**.
 
-This means that extracting the hidden data alone is not sufficient to recover the original message — the encrypted payload must also be successfully decrypted.
+Instead, StegaCrypt derives a **256-bit AES key** using:
 
-> **Note:** This project was developed for educational and portfolio purposes and should not be considered a replacement for professionally audited cryptographic software.
+- PBKDF2
+- SHA-256
+- 100,000 iterations
+- 16-byte cryptographically random salt
+
+A new random salt is generated for every encryption operation.
+
+This means that encrypting data multiple times with the same password does not reuse the same derived key material.
+
+### AES-256-GCM
+
+The secret message is encrypted using **AES-256-GCM** through the browser's Web Crypto API.
+
+Every encryption operation uses a new **12-byte cryptographically random IV**.
+
+AES-GCM provides:
+
+- **Confidentiality** — the plaintext is protected by encryption.
+- **Integrity and authentication** — modified ciphertext or an incorrect password causes decryption to fail.
+
+The salt and IV are stored alongside the ciphertext because they are required for key derivation and decryption. They do not need to remain secret.
+
+### Payload Structure
+
+Before being embedded, the encrypted data is serialized into a payload containing:
+
+```text
+version
+salt
+IV
+ciphertext
+```
+
+The steganographic data is then structured as:
+
+```text
+[ 32-bit payload length ][ encrypted payload ]
+```
+
+The 32-bit header allows the decoder to determine exactly how many bits must be extracted from the image.
+
+This replaces delimiter-based detection and avoids searching through the extracted data for a special termination string.
+
+### LSB Image Steganography
+
+The encrypted payload is hidden using **Least Significant Bit (LSB) manipulation**.
+
+Each payload bit is stored in the least significant bit of an RGB channel:
+
+```text
+Pixel
+
+Red   → LSB may contain data
+Green → LSB may contain data
+Blue  → LSB may contain data
+Alpha → unchanged
+```
+
+Only one bit from each RGB channel is modified, keeping changes to individual pixel values minimal.
+
+The application also checks whether the selected image has enough capacity to contain the complete encrypted payload before embedding it.
+
+### PNG Output
+
+The resulting stego image is exported as **PNG**.
+
+PNG uses lossless compression, preserving the pixel values containing the hidden LSB data.
+
+Lossy image compression, such as JPEG compression, may alter pixel values and destroy the embedded information.
+
+> **Note:** StegaCrypt AES is an educational and portfolio project. It demonstrates cryptographic and steganographic concepts but has not undergone an independent security audit and should not be treated as production security software.
 
 ---
 
@@ -105,6 +207,7 @@ This means that extracting the hidden data alone is not sufficient to recover th
 - **CSS3**
 - **Web Crypto API**
 - **Canvas API**
+- **TextEncoder / TextDecoder**
 
 ---
 
@@ -140,28 +243,53 @@ Then open the local address displayed by Vite in your browser.
 
 ## 🧪 Usage
 
-### Encrypt and hide a message
+### Encrypt and Hide a Message
 
 1. Select an image.
 2. Enter a password.
 3. Enter the secret message.
 4. Click **Criptează AES + Ascunde mesaj**.
-5. Download the generated stego image.
+5. Download the generated PNG stego image.
 
-### Extract and decrypt a message
+### Extract and Decrypt a Message
 
-1. Select an image previously generated by StegaCrypt.
+1. Select a PNG image previously generated by StegaCrypt.
 2. Enter the same password used during encryption.
 3. Click **Extrage + Decriptează**.
-4. The original message is extracted and displayed.
+4. The hidden payload is extracted and decrypted.
+5. The original message is displayed.
+
+---
+
+## 🔬 Technical Details
+
+| Component | Implementation |
+|---|---|
+| Encryption | AES-256-GCM |
+| Key derivation | PBKDF2 |
+| PBKDF2 hash | SHA-256 |
+| PBKDF2 iterations | 100,000 |
+| Salt | Random 16 bytes |
+| IV | Random 12 bytes |
+| Key size | 256 bits |
+| Steganography | LSB |
+| Channels used | RGB |
+| Alpha channel | Unmodified |
+| Payload header | 32-bit length |
+| Output format | PNG |
+| Cryptography API | Web Crypto API |
 
 ---
 
 ## 🎯 Project Purpose
 
-StegaCrypt AES was created as a practical exploration of the relationship between **cryptography, information hiding and web technologies**.
+StegaCrypt AES was created as a practical exploration of the relationship between **cryptography, information hiding and modern web technologies**.
 
-The project demonstrates how modern browser APIs can be used to implement an end-to-end workflow combining authenticated encryption with image-based data hiding.
+The project demonstrates an end-to-end workflow combining:
+
+**password-based key derivation → authenticated encryption → payload serialization → LSB embedding → extraction → authenticated decryption**
+
+It also demonstrates the use of browser-native APIs for cryptographic operations and pixel-level image manipulation without requiring a backend server.
 
 ---
 
