@@ -85,10 +85,7 @@ async function getAESKey(password, salt) {
 async function encryptMessage(message, password) {
   const encoder = new TextEncoder();
 
-  // Random salt for PBKDF2
   const salt = crypto.getRandomValues(new Uint8Array(16));
-
-  // 96-bit IV recommended for AES-GCM
   const iv = crypto.getRandomValues(new Uint8Array(12));
 
   const key = await getAESKey(password, salt);
@@ -102,11 +99,6 @@ async function encryptMessage(message, password) {
     encoder.encode(message)
   );
 
-  /*
-   * Salt and IV are not secret.
-   * They are stored together with the ciphertext so that
-   * the AES key can be derived again during decryption.
-   */
   const payload = {
     version: 1,
     salt: Array.from(salt),
@@ -127,10 +119,9 @@ async function decryptMessage(encryptedText, password) {
   try {
     payload = JSON.parse(encryptedText);
   } catch {
-    throw new Error("Payload-ul criptat nu este valid.");
+    throw new Error("The encrypted payload is invalid.");
   }
 
-  // Basic payload validation
   if (
     !payload ||
     payload.version !== 1 ||
@@ -138,19 +129,19 @@ async function decryptMessage(encryptedText, password) {
     !Array.isArray(payload.iv) ||
     !Array.isArray(payload.data)
   ) {
-    throw new Error("Structura payload-ului nu este validă.");
+    throw new Error("Invalid payload structure.");
   }
 
   if (payload.salt.length !== 16) {
-    throw new Error("Salt invalid.");
+    throw new Error("Invalid salt.");
   }
 
   if (payload.iv.length !== 12) {
-    throw new Error("IV invalid.");
+    throw new Error("Invalid IV.");
   }
 
   if (payload.data.length === 0) {
-    throw new Error("Ciphertext invalid.");
+    throw new Error("Invalid ciphertext.");
   }
 
   const salt = new Uint8Array(payload.salt);
@@ -177,7 +168,7 @@ async function decryptMessage(encryptedText, password) {
 
 function numberTo32BitBinary(number) {
   if (!Number.isSafeInteger(number) || number < 0 || number > 0xffffffff) {
-    throw new Error("Dimensiunea payload-ului nu este validă.");
+    throw new Error("Invalid payload size.");
   }
 
   return number.toString(2).padStart(HEADER_BITS, "0");
@@ -185,7 +176,7 @@ function numberTo32BitBinary(number) {
 
 function binary32ToNumber(bits) {
   if (bits.length !== HEADER_BITS) {
-    throw new Error("Header invalid.");
+    throw new Error("Invalid header.");
   }
 
   return parseInt(bits, 2);
@@ -198,43 +189,29 @@ function binary32ToNumber(bits) {
 function encodeLSB(imageData, message) {
   const messageBits = textToBits(message);
 
-  /*
-   * First 32 bits = payload length in bits.
-   * Remaining bits = encrypted payload.
-   */
   const lengthHeader = numberTo32BitBinary(messageBits.length);
   const bits = lengthHeader + messageBits;
 
   const data = new Uint8ClampedArray(imageData.data);
 
-  /*
-   * Every pixel has:
-   * R, G, B, A
-   *
-   * We use only RGB, therefore 3 bits per pixel.
-   */
+  // Three usable channels per pixel: R, G and B.
   const capacity = Math.floor((data.length / 4) * 3);
 
   if (bits.length > capacity) {
     throw new Error(
-      "Mesajul criptat este prea lung pentru această imagine."
+      "The encrypted message is too large for this image."
     );
   }
 
   let bitIndex = 0;
 
   for (let i = 0; i < data.length && bitIndex < bits.length; i++) {
-    // Skip alpha channel
+    // Skip the alpha channel.
     if ((i + 1) % 4 === 0) {
       continue;
     }
 
-    /*
-     * Clear the current least significant bit
-     * and replace it with our payload bit.
-     */
     data[i] = (data[i] & 0xfe) | Number(bits[bitIndex]);
-
     bitIndex++;
   }
 
@@ -251,11 +228,10 @@ function encodeLSB(imageData, message) {
 
 function decodeLSB(imageData) {
   const data = imageData.data;
-
   const capacity = Math.floor((data.length / 4) * 3);
 
   if (capacity < HEADER_BITS) {
-    throw new Error("Imaginea este prea mică.");
+    throw new Error("The image is too small.");
   }
 
   let headerBits = "";
@@ -265,16 +241,13 @@ function decodeLSB(imageData) {
   let readableBitIndex = 0;
 
   for (let i = 0; i < data.length; i++) {
-    // Skip alpha channel
+    // Skip the alpha channel.
     if ((i + 1) % 4 === 0) {
       continue;
     }
 
     const bit = String(data[i] & 1);
 
-    /*
-     * Read the first 32 RGB LSBs as the length header.
-     */
     if (readableBitIndex < HEADER_BITS) {
       headerBits += bit;
       readableBitIndex++;
@@ -282,12 +255,6 @@ function decodeLSB(imageData) {
       if (readableBitIndex === HEADER_BITS) {
         payloadLength = binary32ToNumber(headerBits);
 
-        /*
-         * Validate the declared payload size.
-         *
-         * This also prevents random normal images from causing
-         * us to attempt to read an impossible amount of data.
-         */
         const availablePayloadBits = capacity - HEADER_BITS;
 
         if (
@@ -296,7 +263,7 @@ function decodeLSB(imageData) {
           payloadLength % 8 !== 0
         ) {
           throw new Error(
-            "Imaginea nu conține un payload StegaCrypt valid."
+            "This image does not contain a valid StegaCrypt payload."
           );
         }
       }
@@ -317,7 +284,7 @@ function decodeLSB(imageData) {
   }
 
   throw new Error(
-    "Nu s-a putut extrage payload-ul complet din imagine."
+    "The complete payload could not be extracted from the image."
   );
 }
 
@@ -358,7 +325,7 @@ export default function SteganographyApp() {
 
         if (!ctx) {
           throw new Error(
-            "Browserul nu a putut inițializa Canvas."
+            "The browser could not initialize Canvas."
           );
         }
 
@@ -385,7 +352,7 @@ export default function SteganographyApp() {
         setError(
           err instanceof Error
             ? err.message
-            : "Imaginea nu a putut fi încărcată."
+            : "The image could not be loaded."
         );
       }
     };
@@ -397,7 +364,7 @@ export default function SteganographyApp() {
       setImageData(null);
 
       setError(
-        "Fișierul selectat nu a putut fi încărcat ca imagine."
+        "The selected file could not be loaded as an image."
       );
     };
 
@@ -414,15 +381,15 @@ export default function SteganographyApp() {
       setDecoded("");
 
       if (!imageData) {
-        throw new Error("Alege mai întâi o imagine.");
+        throw new Error("Please select an image first.");
       }
 
       if (!message.trim()) {
-        throw new Error("Scrie un mesaj secret.");
+        throw new Error("Please enter a secret message.");
       }
 
       if (!password) {
-        throw new Error("Introdu o parolă.");
+        throw new Error("Please enter a password.");
       }
 
       const encryptedMessage = await encryptMessage(
@@ -444,29 +411,26 @@ export default function SteganographyApp() {
 
       if (!ctx) {
         throw new Error(
-          "Browserul nu a putut inițializa Canvas."
+          "The browser could not initialize Canvas."
         );
       }
 
       ctx.putImageData(stegData, 0, 0);
 
-      /*
-       * PNG is used because it is lossless.
-       * Lossy compression such as JPEG can destroy LSB data.
-       */
+      // PNG is lossless and preserves the modified LSB values.
       const stegUrl = canvas.toDataURL("image/png");
 
       setImage(stegUrl);
       setImageData(stegData);
 
       alert(
-        "Mesajul a fost criptat cu AES-256-GCM și ascuns în imagine."
+        "The message was encrypted with AES-256-GCM and hidden in the image."
       );
     } catch (err) {
       setError(
         err instanceof Error
           ? err.message
-          : "A apărut o eroare la criptare."
+          : "An error occurred during encryption."
       );
     }
   };
@@ -481,11 +445,11 @@ export default function SteganographyApp() {
       setDecoded("");
 
       if (!imageData) {
-        throw new Error("Alege mai întâi o imagine.");
+        throw new Error("Please select an image first.");
       }
 
       if (!password) {
-        throw new Error("Introdu parola.");
+        throw new Error("Please enter the password.");
       }
 
       const encryptedText = decodeLSB(imageData);
@@ -498,7 +462,7 @@ export default function SteganographyApp() {
       setDecoded(originalMessage);
     } catch {
       setError(
-        "Nu s-a putut extrage/decripta mesajul. Verifică imaginea și parola."
+        "The message could not be extracted or decrypted. Check the image and password."
       );
     }
   };
@@ -557,7 +521,7 @@ export default function SteganographyApp() {
 
         <input
           type="password"
-          placeholder="Introdu parola"
+          placeholder="Enter password"
           value={password}
           onChange={(e) =>
             setPassword(e.target.value)
@@ -576,7 +540,7 @@ export default function SteganographyApp() {
 
         <textarea
           rows="6"
-          placeholder="Introdu mesajul secret..."
+          placeholder="Enter your secret message..."
           value={message}
           onChange={(e) =>
             setMessage(e.target.value)
@@ -607,7 +571,7 @@ export default function SteganographyApp() {
             cursor: "pointer",
           }}
         >
-          Criptează AES + Ascunde mesaj
+          Encrypt & Hide Message
         </button>
 
         <button
@@ -623,7 +587,7 @@ export default function SteganographyApp() {
             cursor: "pointer",
           }}
         >
-          Extrage + Decriptează
+          Extract & Decrypt
         </button>
 
         {error && (
@@ -646,7 +610,7 @@ export default function SteganographyApp() {
               borderRadius: "8px",
             }}
           >
-            <strong>Mesaj decriptat:</strong>
+            <strong>Decrypted message:</strong>
 
             <p
               style={{
@@ -676,7 +640,7 @@ export default function SteganographyApp() {
 
             <a
               href={image}
-              download="imagine_aes_steganografiata.png"
+              download="stegacrypt-encrypted-image.png"
               style={{
                 display: "inline-block",
                 marginTop: "20px",
@@ -688,7 +652,7 @@ export default function SteganographyApp() {
                 fontSize: "17px",
               }}
             >
-              Descarcă imaginea
+              Download Stego Image
             </a>
           </div>
         )}
